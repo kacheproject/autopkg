@@ -59,7 +59,7 @@ pub fn build(b: *std.build.Builder) void {
 
 The `package()` function is not limited to the two parameters specified here. You can return alternative version of `AutoPkgI` depends on the arguments or even the environment.
 
-If you don't want to specify a auto package and just want to depend on one using that, you could use `AutoPkg.dependedBy()`:
+If you don't want to specify an auto package and just want to depend on one using that, you could use `AutoPkg.dependedBy()`:
 
 ````zig
 const thePackageYouWorkWith = @import("./package/build.zig");
