@@ -2,7 +2,7 @@
 Autopkg is a library works with zig build system to simplify package management.
 
 Featured:
-- Declrative experience
+- Declarative experience
 - Programable package
 - Nested directory structure support
 - Working with C headers and sources
