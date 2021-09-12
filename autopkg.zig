@@ -36,11 +36,11 @@ pub const AutoPkgI = packed struct {
     includeDirs: PackedSlice([]const u8, true) = undefined,
     cSrcFiles: PackedSlice([]const u8, true) = undefined,
     ccflags: PackedSlice([]const u8, true) = undefined,
-    linkLibC: bool = false,
-    alloc: usize = 0,
     linkSystemLibs: PackedSlice([]const u8, true) = undefined,
     linkLibNames: PackedSlice([]const u8, true) = undefined,
     libraryPaths: PackedSlice([]const u8, true) = undefined,
+    linkLibC: bool = false,
+    alloc: usize = 0,
 
     const Self = @This();
 
@@ -55,9 +55,9 @@ pub const AutoPkgI = packed struct {
             .ccflags = PackedSlice([]const u8, true).init(val.ccflags),
             .linkLibC = val.linkLibC,
             .alloc = if (val.alloc) |alloc| @ptrToInt(alloc) else 0,
-            .linkSystemLibs = PackedSlice([]const u8, true).init(&.{}),
-            .linkLibNames = PackedSlice([]const u8, true).init(&.{}),
-            .libraryPaths = PackedSlice([]const u8, true).init(&.{}),
+            .linkSystemLibs = PackedSlice([]const u8, true).init(val.linkSystemLibs),
+            .linkLibNames = PackedSlice([]const u8, true).init(val.linkLibNames),
+            .libraryPaths = PackedSlice([]const u8, true).init(val.libraryPaths),
         };
     }
 
@@ -72,6 +72,9 @@ pub const AutoPkgI = packed struct {
             .ccflags = self.ccflags.slice(),
             .linkLibC = self.linkLibC,
             .alloc = if (self.alloc != 0) @intToPtr(*Allocator, self.alloc) else null,
+            .linkSystemLibs = self.linkSystemLibs.slice(),
+            .linkLibNames = self.linkLibNames.slice(),
+            .libraryPaths = self.libraryPaths.slice(),
         };
     }
 };
@@ -98,6 +101,9 @@ pub const AutoPkg = struct {
     includeDirs: []const []const u8 = &.{},
     cSrcFiles: []const []const u8 = &.{},
     ccflags: []const []const u8 = &.{},
+    linkSystemLibs: []const []const u8 = &.{},
+    linkLibNames: []const []const u8 = &.{},
+    libraryPaths: []const []const u8 = &.{},
     linkLibC: bool = false,
     alloc: ?*Allocator = null,
 
@@ -122,6 +128,15 @@ pub const AutoPkg = struct {
         }
         if (self.linkLibC) {
             me.linkLibC();
+        }
+        for (self.linkSystemLibs) |l| {
+            me.linkSystemLibrary(l);
+        }
+        for (self.linkLibNames) |l| {
+            me.linkSystemLibraryName(l);
+        }
+        for (self.libraryPaths) |p| {
+            me.addLibPath(p);
         }
         return me;
     }
@@ -167,6 +182,27 @@ pub const AutoPkg = struct {
         var newRootSrc = if (self.rootSrc.len != 0) try _p.join(alloc, &.{rootPath, self.rootSrc}) else try alloc.dupe(u8, self.rootSrc);
         errdefer alloc.free(newRootSrc);
 
+        var newSystemLibs = try alloc.alloc([]const u8, self.linkSystemLibs.len);
+        errdefer alloc.free(newSystemLibs);
+        for (self.linkSystemLibs) |l, i| {
+            newSystemLibs[i] = try alloc.dupe(u8, l);
+            errdefer alloc.free(newSystemLibs[i]);
+        }
+
+        var newLibNames = try alloc.alloc([]const u8, self.linkLibNames.len);
+        errdefer alloc.free(newLibNames);
+        for (self.linkLibNames) |l, i| {
+            newLibNames[i] = try alloc.dupe(u8, l);
+            errdefer alloc.free(newLibNames[i]);
+        }
+
+        var newLibPaths = try alloc.alloc([]const u8, self.libraryPaths.len);
+        errdefer alloc.free(newLibPaths);
+        for (self.libraryPaths) |l, i| {
+            newLibPaths[i] = try _p.join(alloc, &.{rootPath, l});
+            errdefer alloc.free(newLibPaths[i]);
+        }
+
         return AutoPkg {
             .name = try alloc.dupe(u8, self.name),
             .path = rootPath,
@@ -177,19 +213,28 @@ pub const AutoPkg = struct {
             .ccflags = self.ccflags,
             .linkLibC = self.linkLibC,
             .alloc = alloc,
+            .linkSystemLibs = newSystemLibs,
+            .linkLibNames = newLibNames,
+            .libraryPaths = newLibPaths,
         };
     }
 
     pub fn deinit(self: *Self) void {
-        for (self.dependencies) |d| {
+        for (self.dependencies) |*d| {
             d.deinit();
         }
         if (self.alloc) |alloc| {
             alloc.free(self.name);
             alloc.free(self.path);
             alloc.free(self.rootSrc);
-            inline for (.{self.dependencies, self.includeDirs, self.cSrcFiles}) |arr| {
-                inline for (arr) |e| {
+            alloc.free(self.dependencies);
+            const arrToBeFreed = [_][]const []const u8{
+                self.includeDirs,
+                self.cSrcFiles, self.linkSystemLibs,
+                self.linkLibNames, self.libraryPaths
+            };
+            for (arrToBeFreed) |arr| {
+                for (arr) |e| {
                     alloc.free(e);
                 }
                 alloc.free(arr);
