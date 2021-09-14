@@ -29,9 +29,9 @@ fn PackedSlice (comptime T: type, constant: bool) type {
 /// This is a travsal structure for your package.
 /// The structure is used to transfer infomation between different autopkg in different import container.
 pub const AutoPkgI = packed struct {
-    name: PackedSlice(u8, true),
-    path: PackedSlice(u8, true),
-    rootSrc: PackedSlice(u8, true), // Releative to .path
+    name: PackedSlice(u8, true) = undefined,
+    path: PackedSlice(u8, true) = undefined,
+    rootSrc: PackedSlice(u8, true) = undefined, // Releative to .path
     dependencies: PackedSlice(AutoPkg, false) = undefined,
     includeDirs: PackedSlice([]const u8, true) = undefined,
     cSrcFiles: PackedSlice([]const u8, true) = undefined,
@@ -77,15 +77,38 @@ pub const AutoPkgI = packed struct {
             .libraryPaths = self.libraryPaths.slice(),
         };
     }
+
+    fn advCast(obj: anytype) Self {
+        const T = @TypeOf(obj);
+        var newObj = Self {};
+        comptime const requiredFieldList = .{
+            "name", "path", "rootSrc", "dependencies",
+            "includeDirs", "cSrcFiles", "ccflags",
+            "linkLibC", "linkSystemLibs", "linkLibNames", "libraryPaths",
+        };
+        inline for (requiredFieldList) |name| {
+            if (@hasField(T, name)) {
+                @field(newObj, name) = @bitCast(@TypeOf(@field(newObj, name)), @field(obj, name));
+            } else {
+                @compileError("AutoPkgI field '" ++ name ++ "' not found.");
+            }
+        }
+        newObj.alloc = @field(obj, "alloc");
+        // Optional fields:
+        return newObj;
+    }
 };
 
 pub fn accept(pkg: anytype) AutoPkg {
-    var casted = @bitCast(AutoPkgI, pkg);
+    var casted = AutoPkgI.advCast(pkg);
     return casted.toNormal();
 }
 
+var generalAllocator = std.heap.GeneralPurposeAllocator(.{}){};
+
 pub fn genExport(pkg: AutoPkg) AutoPkgI {
-    return AutoPkgI.fromNormal(pkg);
+    var newPkg = pkg.dupe(pkg.alloc orelse &generalAllocator.allocator) catch unreachable;
+    return AutoPkgI.fromNormal(newPkg);
 }
 
 /// Declare your package.
@@ -96,7 +119,7 @@ pub fn genExport(pkg: AutoPkg) AutoPkgI {
 pub const AutoPkg = struct {
     name: []const u8,
     path: []const u8,
-    rootSrc: []const u8, // Releative to .path
+    rootSrc: []const u8 = &.{}, // Releative to .path
     dependencies: []AutoPkg = &.{},
     includeDirs: []const []const u8 = &.{},
     cSrcFiles: []const []const u8 = &.{},
@@ -219,6 +242,26 @@ pub const AutoPkg = struct {
         };
     }
 
+    pub fn dupe(self: *const Self, alloc: *Allocator) Allocator.Error!Self {
+        var result = Self {
+            .name = &.{},
+            .path = &.{},
+        };
+        inline for (.{"name", "path", "rootSrc", "dependencies"}) |name| {
+            @field(result, name) = try alloc.dupe(@typeInfo(@TypeOf(@field(self, name))).Pointer.child, @field(self, name));
+            errdefer alloc.free(@field(result, name));
+        }
+        inline for (.{"includeDirs", "cSrcFiles", "ccflags", "linkSystemLibs", "linkLibNames", "libraryPaths"}) |name| {
+            @field(result, name) = try alloc.dupe(@typeInfo(@TypeOf(@field(self, name))).Pointer.child, @field(self, name));
+            errdefer alloc.free(@field(result, name));
+        }
+        inline for (.{"linkLibC"}) |name| {
+            @field(result, name) = @field(self, name);
+        }
+        result.alloc = alloc;
+        return result;
+    }
+
     pub fn deinit(self: *Self) void {
         for (self.dependencies) |*d| {
             d.deinit();
@@ -233,11 +276,8 @@ pub const AutoPkg = struct {
                 self.cSrcFiles, self.linkSystemLibs,
                 self.linkLibNames, self.libraryPaths
             };
-            for (arrToBeFreed) |arr| {
-                for (arr) |e| {
-                    alloc.free(e);
-                }
-                alloc.free(arr);
+            inline for (.{"includeDirs", "cSrcFiles", "linkSystemLibs", "linkLibNames", "libraryPaths"}) |name| {
+                alloc.free(@field(self, name));
             }
             self.alloc = null;
         }
