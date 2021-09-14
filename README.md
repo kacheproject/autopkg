@@ -49,7 +49,8 @@ pub fn package(name: []const u8, path: []const u8) autopkg.AutoPkgI {
 pub fn build(b: *std.build.Builder) void {
     const mode = b.standardReleaseOptions();
 
-    const mainPackage = autopkg.accept(package("main", "."));
+    var mainPackage = autopkg.accept(package("main", "."));
+    defer mainPackage.deinit();
     var resolvedPackage = mainPackage.resolve(".", b.allocator) catch unreachable;
     const lib = resolvedPackage.addBuild(b);
     lib.setBuildMode(mode);
@@ -75,6 +76,20 @@ pub fn build(b: *std.build.Builder) void {
     lib.install();
 }
 ````
+
+### Inside Memory Management
+Autopkg will do multiple copy in heap to make sure the infomation alive:
+
+- `genExport`
+- `AutoPkg.resolve`
+
+and `AutoPkg.deinit` will call `AutoPkg.deinit` of every `AutoPkg` it refered.
+
+As the fact of `std.build.Builder.allocator` is an ArenaAllocator, you don't need to deinitilise the structure if you use with that (Just like above exmaple).
+
+Internally autopkg uses a `std.heap.GeneralPurposeAllocator` to allocate memory when calling `genExport()`.
+
+Remember: unrefered packages will cause memory leak!
 
 ## Contributing
 
