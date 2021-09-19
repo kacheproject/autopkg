@@ -41,6 +41,7 @@ pub const AutoPkgI = packed struct {
     libraryPaths: PackedSlice([]const u8, true) = undefined,
     linkLibC: bool = false,
     alloc: usize = 0,
+    doNotTest: bool = false,
 
     const Self = @This();
 
@@ -58,6 +59,7 @@ pub const AutoPkgI = packed struct {
             .linkSystemLibs = PackedSlice([]const u8, true).init(val.linkSystemLibs),
             .linkLibNames = PackedSlice([]const u8, true).init(val.linkLibNames),
             .libraryPaths = PackedSlice([]const u8, true).init(val.libraryPaths),
+            .doNotTest = val.doNotTest,
         };
     }
 
@@ -75,6 +77,7 @@ pub const AutoPkgI = packed struct {
             .linkSystemLibs = self.linkSystemLibs.slice(),
             .linkLibNames = self.linkLibNames.slice(),
             .libraryPaths = self.libraryPaths.slice(),
+            .doNotTest = self.doNotTest,
         };
     }
 
@@ -95,6 +98,11 @@ pub const AutoPkgI = packed struct {
         }
         newObj.alloc = @field(obj, "alloc");
         // Optional fields:
+        if (@hasField(T, "doNotTest")){
+            @field(newObj, "doNotTest") = @as(bool, @field(obj, "doNotTest"));
+        } else {
+            @field(newObj, "doNotTest") = true;
+        }
         return newObj;
     }
 };
@@ -129,17 +137,29 @@ pub const AutoPkg = struct {
     libraryPaths: []const []const u8 = &.{},
     linkLibC: bool = false,
     alloc: ?*Allocator = null,
+    doNotTest: bool = false,
+    // To developers: Once you add new field here, make sure they will be copied in
+    // `.resolve()` and `.dupe()`. Don't forget deinitlise it in `.deinit()` when needed.
+    // And don't forget add them in `AutoPkgI`.
 
     const Self = @This();
 
     /// Add to builder as a static library.
     pub fn addBuild(self: *const Self, b: *std.build.Builder) *std.build.LibExeObjStep {
+        var me = b.addStaticLibrary(self.name, if (self.rootSrc.len != 0) self.rootSrc else null);
+        self.setupBuild(me, b);
+        return me;
+    }
+
+    fn setupBuild(self: *const Self, me: *std.build.LibExeObjStep, b: *std.build.Builder) void {
         var dependedSteps = b.allocator.alloc(*std.build.LibExeObjStep, self.dependencies.len) catch unreachable;
         defer b.allocator.free(dependedSteps);
         for (self.dependencies) |d, i| {
             dependedSteps[i] = d.addBuild(b);
+            if (d.rootSrc.len > 0) {
+                me.addPackagePath(d.name, d.rootSrc);
+            }
         }
-        var me = b.addStaticLibrary(self.name, if (self.rootSrc.len != 0) self.rootSrc else null);
         for (dependedSteps) |step| {
             me.linkLibrary(step);
         }
@@ -161,12 +181,40 @@ pub const AutoPkg = struct {
         for (self.libraryPaths) |p| {
             me.addLibPath(p);
         }
-        return me;
     }
 
     pub fn dependedBy(self: *const Self, step: *std.build.LibExeObjStep) void {
         var buildStep = self.addBuild(step.builder);
         step.linkLibrary(buildStep);
+    }
+
+    pub fn addTest(self: *const Self, b: *std.build.Builder, mode: std.builtin.Mode, target: *const std.zig.CrossTarget) *std.build.Step {
+        var dependedTestSteps = b.allocator.alloc(?*std.build.Step, self.dependencies.len) catch unreachable;
+        defer b.allocator.free(dependedTestSteps);
+        for (self.dependencies) |d, i| {
+            dependedTestSteps[i] = d.addTest(b, mode, target);
+        }
+        if (self.rootSrc.len > 0 and !self.doNotTest) {
+            var me = b.addTest(self.rootSrc);
+            self.setupBuild(me, b);
+            me.setBuildMode(mode);
+            me.setTarget(target.*);
+            for (dependedTestSteps) |step| {
+                if (step) |stepnn| {
+                    me.step.dependOn(stepnn);
+                }
+            }
+            return &me.step;
+        } else {
+            var me = b.allocator.create(std.build.Step) catch unreachable;
+            me.* = std.build.Step.initNoOp(std.build.Step.Id.Custom, "autopkgTestPlaceHolder", b.allocator);
+            for (dependedTestSteps) |step| {
+                if (step) |stepnn| {
+                    me.dependOn(stepnn);
+                }
+            }
+            return me;
+        }
     }
 
     /// Resolve all pathes, this method should not be called twice or more.
@@ -239,6 +287,7 @@ pub const AutoPkg = struct {
             .linkSystemLibs = newSystemLibs,
             .linkLibNames = newLibNames,
             .libraryPaths = newLibPaths,
+            .doNotTest = self.doNotTest,
         };
     }
 
@@ -255,7 +304,7 @@ pub const AutoPkg = struct {
             @field(result, name) = try alloc.dupe(@typeInfo(@TypeOf(@field(self, name))).Pointer.child, @field(self, name));
             errdefer alloc.free(@field(result, name));
         }
-        inline for (.{"linkLibC"}) |name| {
+        inline for (.{"linkLibC", "doNotTest"}) |name| {
             @field(result, name) = @field(self, name);
         }
         result.alloc = alloc;
