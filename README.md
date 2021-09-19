@@ -91,6 +91,45 @@ Internally autopkg uses a `std.heap.GeneralPurposeAllocator` to allocate memory 
 
 Remember: unrefered packages will cause memory leak!
 
+### Tests
+
+Autopkg can automatically handle tests dependencies for you, and you can test the packages you work with if they set `doNotTest` to false (which is the default) or their autopkg is older versions does not support tests.
+
+If you will publish the package, it's recommended to set `doNotTest` as `true`.
+
+````zig
+const std = @import("std");
+const autopkg = @import("autopkg/autopkg.zig");
+
+pub fn package(name: []const u8, path: []const u8) autopkg.AutoPkgI {
+    const thePackageYouNeed = @import("./package/build.zig");
+    return autopkg.genExport(.{
+        .name = name,
+        .path = path,
+        .rootSrc = "src/main.zig",
+        .dependencies = &.{
+            autopkg.accept(thePackageYouNeed.package("package", "./package")),
+        },
+        .doNotTest = false, // though it's by default.
+    });
+}
+
+pub fn build(b: *std.build.Builder) void {
+    const mode = b.standardReleaseOptions();
+    const target = b.standardTargetOptions(.{});
+
+    var mainPackage = autopkg.accept(package("main", "."));
+    defer mainPackage.deinit();
+    var resolvedPackage = mainPackage.resolve(".", b.allocator) catch unreachable;
+    const lib = resolvedPackage.addBuild(b);
+    lib.setBuildMode(mode);
+    lib.install();
+    
+    var testStep = b.addStep("test" , "Run all tests");
+    testStep.dependOn(resolvedPackage.addTest(b, mode, target));
+}
+````
+
 ## Contributing
 
 Suggestion/Pull Request welcome!
