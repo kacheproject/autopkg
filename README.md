@@ -93,7 +93,9 @@ Remember: unrefered packages will cause memory leak!
 
 ### Tests
 
-Autopkg can automatically handle tests dependencies for you, and you can test the packages you work with if they set `doNotTest` to false (which is the default) or their autopkg is older versions does not support tests.
+Autopkg can automatically handle tests dependencies for you, and you can test the packages you work with if they set `doNotTest` to false (which is the default). Any package's tests will be skipped if it's `doNotTest` is `true`.
+
+For older versions' autopkg, `doNotTest` is `true` by default.
 
 If you will publish the package, it's recommended to set `doNotTest` as `true`.
 
