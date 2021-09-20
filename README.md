@@ -132,6 +132,56 @@ pub fn build(b: *std.build.Builder) void {
 }
 ````
 
+#### Addtional Testing
+
+Zig build system's testing will not cover the files imported. To test these files or other files you want to test, add them into `testSrcs`.
+
+````Zig
+pub fn package(name: []const u8, path: []const u8) autopkg.AutoPkgI {
+    const thePackageYouNeed = @import("./package/build.zig");
+    return autopkg.genExport(.{
+        .name = name,
+        .path = path,
+        .rootSrc = "src/main.zig",
+        .dependencies = &.{
+            autopkg.accept(thePackageYouNeed.package("package", "./package")),
+        },
+        .doNotTest = false, // though it's by default.
+        .testSrcs = &.{
+            "src/file1.zig",
+            "src/file2.zig",
+        },
+    });
+}
+````
+
+These addtional testings follow the `doNotTest` option as well.
+
+## C Source and Header Files
+
+Autopkg can help you mixing zig and C sources with ease.
+
+````
+pub fn package(name: []const u8, path: []const u8) autopkg.AutoPkgI {
+    const thePackageYouNeed = @import("./package/build.zig");
+    return autopkg.genExport(.{
+        .name = name,
+        .path = path,
+        .rootSrc = "src/main.zig",
+        .includeDirs = &.{"include"},
+        .cSrcFiles = &.{"./src/main.c"},
+        .dependencies = &.{
+            autopkg.accept(thePackageYouNeed.package("package", "./package")),
+        },
+        .ccflags = &.{"-Wall", "-std=c11", "-g"},
+    });
+}
+````
+
+Autopkg will set up the build system to mix your zig files and C sources `cSrcFiles` (with `includeDirs` as include directories). C sources will be compiled with `ccflags`.
+
+`includeDirs` will be added to the packages which depends on this package. It's recommended that only put the files will be directly refered in your zig package and choose name carefully.
+
 ## Contributing
 
 Suggestion/Pull Request welcome!
