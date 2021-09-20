@@ -23,6 +23,13 @@ fn PackedSlice (comptime T: type, constant: bool) type {
         pub fn slice(self: *Self) if (constant) []const T else []T {
             return self.ptr[0..self.len];
         }
+
+        pub fn advCast(obj: anytype) Self {
+            return Self {
+                .ptr = @field(obj, "ptr"),
+                .len = @field(obj, "len"),
+            };
+        }
     };
 }
 
@@ -39,9 +46,17 @@ pub const AutoPkgI = packed struct {
     linkSystemLibs: PackedSlice([]const u8, true) = undefined,
     linkLibNames: PackedSlice([]const u8, true) = undefined,
     libraryPaths: PackedSlice([]const u8, true) = undefined,
-    linkLibC: bool = false,
     alloc: usize = 0,
+    linkLibC: bool = false,
     doNotTest: bool = false,
+    // these placeholders are workaround to aligned pointer...can be used in future.
+    placeholder0: bool = false,
+    placeholder1: bool = false,
+    placeholder2: bool = false,
+    placeholder3: bool = false,
+    placeholder4: bool = false,
+    placeholder5: bool = false,
+    testSrcs: PackedSlice([]const u8, true) = undefined,
 
     const Self = @This();
 
@@ -60,6 +75,7 @@ pub const AutoPkgI = packed struct {
             .linkLibNames = PackedSlice([]const u8, true).init(val.linkLibNames),
             .libraryPaths = PackedSlice([]const u8, true).init(val.libraryPaths),
             .doNotTest = val.doNotTest,
+            .testSrcs = PackedSlice([]const u8, true).init(val.testSrcs),
         };
     }
 
@@ -78,6 +94,7 @@ pub const AutoPkgI = packed struct {
             .linkLibNames = self.linkLibNames.slice(),
             .libraryPaths = self.libraryPaths.slice(),
             .doNotTest = self.doNotTest,
+            .testSrcs = self.testSrcs.slice(),
         };
     }
 
@@ -102,6 +119,11 @@ pub const AutoPkgI = packed struct {
             @field(newObj, "doNotTest") = @as(bool, @field(obj, "doNotTest"));
         } else {
             @field(newObj, "doNotTest") = true;
+        }
+        if (@hasField(T, "testSrcs")) {
+            @field(newObj, "testSrcs") = PackedSlice([]const u8, true).advCast(@field(obj, "testSrcs"));
+        } else {
+            @field(newObj, "testSrcs") = PackedSlice([]const u8, true).init(&.{});
         }
         return newObj;
     }
@@ -138,6 +160,7 @@ pub const AutoPkg = struct {
     linkLibC: bool = false,
     alloc: ?*Allocator = null,
     doNotTest: bool = false,
+    testSrcs: []const []const u8 = &.{},
     // To developers: Once you add new field here, make sure they will be copied in
     // `.resolve()` and `.dupe()`. Don't forget deinitlise it in `.deinit()` when needed.
     // And don't forget add them in `AutoPkgI`.
@@ -159,9 +182,10 @@ pub const AutoPkg = struct {
             if (d.rootSrc.len > 0) {
                 me.addPackagePath(d.name, d.rootSrc);
             }
-        }
-        for (dependedSteps) |step| {
-            me.linkLibrary(step);
+            for (d.includeDirs) |dir| {
+                me.addIncludeDir(dir);
+            }
+            me.linkLibrary(dependedSteps[i]);
         }
         for (self.includeDirs) |dir| {
             me.addIncludeDir(dir);
@@ -188,6 +212,14 @@ pub const AutoPkg = struct {
         step.linkLibrary(buildStep);
     }
 
+    fn setupSingleTest(self: *const Self, src: []const u8, b: *std.build.Builder, mode: std.builtin.Mode, target: *const std.zig.CrossTarget) *std.build.LibExeObjStep {
+        var me = b.addTest(src);
+        self.setupBuild(me, b);
+        me.setBuildMode(mode);
+        me.setTarget(target.*);
+        return me;
+    }
+
     pub fn addTest(self: *const Self, b: *std.build.Builder, mode: std.builtin.Mode, target: *const std.zig.CrossTarget) *std.build.Step {
         var dependedTestSteps = b.allocator.alloc(?*std.build.Step, self.dependencies.len) catch unreachable;
         defer b.allocator.free(dependedTestSteps);
@@ -195,14 +227,15 @@ pub const AutoPkg = struct {
             dependedTestSteps[i] = d.addTest(b, mode, target);
         }
         if (self.rootSrc.len > 0 and !self.doNotTest) {
-            var me = b.addTest(self.rootSrc);
-            self.setupBuild(me, b);
-            me.setBuildMode(mode);
-            me.setTarget(target.*);
+            var me = self.setupSingleTest(self.rootSrc, b, mode, target);
             for (dependedTestSteps) |step| {
                 if (step) |stepnn| {
                     me.step.dependOn(stepnn);
                 }
+            }
+            for (self.testSrcs) |src| {
+                var step = self.setupSingleTest(src, b, mode, target);
+                me.step.dependOn(&step.step);
             }
             return &me.step;
         } else {
@@ -211,6 +244,12 @@ pub const AutoPkg = struct {
             for (dependedTestSteps) |step| {
                 if (step) |stepnn| {
                     me.dependOn(stepnn);
+                }
+            }
+            if (!self.doNotTest) {
+                for (self.testSrcs) |src| {
+                    var step = self.setupSingleTest(src, b, mode, target);
+                    me.dependOn(&step.step);
                 }
             }
             return me;
@@ -274,6 +313,13 @@ pub const AutoPkg = struct {
             errdefer alloc.free(newLibPaths[i]);
         }
 
+        var newTestSrcs = try alloc.alloc([]const u8, self.testSrcs.len);
+        errdefer alloc.free(newTestSrcs);
+        for (self.testSrcs) |src, i| {
+            newTestSrcs[i] = try _p.join(alloc, &.{rootPath, src});
+            errdefer alloc.free(newTestSrcs[i]);
+        }
+
         return AutoPkg {
             .name = try alloc.dupe(u8, self.name),
             .path = rootPath,
@@ -288,6 +334,7 @@ pub const AutoPkg = struct {
             .linkLibNames = newLibNames,
             .libraryPaths = newLibPaths,
             .doNotTest = self.doNotTest,
+            .testSrcs = newTestSrcs,
         };
     }
 
@@ -300,7 +347,7 @@ pub const AutoPkg = struct {
             @field(result, name) = try alloc.dupe(@typeInfo(@TypeOf(@field(self, name))).Pointer.child, @field(self, name));
             errdefer alloc.free(@field(result, name));
         }
-        inline for (.{"includeDirs", "cSrcFiles", "ccflags", "linkSystemLibs", "linkLibNames", "libraryPaths"}) |name| {
+        inline for (.{"includeDirs", "cSrcFiles", "ccflags", "linkSystemLibs", "linkLibNames", "libraryPaths", "testSrcs"}) |name| {
             @field(result, name) = try alloc.dupe(@typeInfo(@TypeOf(@field(self, name))).Pointer.child, @field(self, name));
             errdefer alloc.free(@field(result, name));
         }
@@ -325,7 +372,7 @@ pub const AutoPkg = struct {
                 self.cSrcFiles, self.linkSystemLibs,
                 self.linkLibNames, self.libraryPaths
             };
-            inline for (.{"includeDirs", "cSrcFiles", "linkSystemLibs", "linkLibNames", "libraryPaths"}) |name| {
+            inline for (.{"includeDirs", "cSrcFiles", "linkSystemLibs", "linkLibNames", "libraryPaths", "testSrcs"}) |name| {
                 alloc.free(@field(self, name));
             }
             self.alloc = null;
