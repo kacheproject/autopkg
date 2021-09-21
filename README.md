@@ -134,7 +134,7 @@ pub fn build(b: *std.build.Builder) void {
 
 #### Addtional Testing
 
-Zig build system's testing will not cover the files imported. To test these files or other files you want to test, add them into `testSrcs`.
+Zig build system's testing may not cover some files you want. To test these files, add them into `testSrcs`.
 
 ````Zig
 pub fn package(name: []const u8, path: []const u8) autopkg.AutoPkgI {
