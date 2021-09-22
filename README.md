@@ -9,6 +9,11 @@ Featured:
 
 Zig build system lack of these important QoL features. This library is intented to provide them.
 
+| Zig Branch | Zig Version    | Supported |
+|------------|----------------|-----------|
+| stable     | 0.8.0, 0.8.1    | YES       |
+| master     | 0.9.0+dev.1139 | YES       |
+
 ## Basic Usage
 
 This library is zero-dependency. Just copy the `autopkg.zig` or refer by git submodule.
@@ -161,7 +166,7 @@ These addtional testings follow the `doNotTest` option as well.
 
 Autopkg can help you mixing zig and C sources with ease.
 
-````
+````zig
 pub fn package(name: []const u8, path: []const u8) autopkg.AutoPkgI {
     const thePackageYouNeed = @import("./package/build.zig");
     return autopkg.genExport(.{
