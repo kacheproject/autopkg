@@ -101,7 +101,7 @@ pub const AutoPkgI = packed struct {
     fn advCast(obj: anytype) Self {
         const T = @TypeOf(obj);
         var newObj = Self {};
-        comptime const requiredFieldList = .{
+        const requiredFieldList = comptime .{
             "name", "path", "rootSrc", "dependencies",
             "includeDirs", "cSrcFiles", "ccflags",
             "linkLibC", "linkSystemLibs", "linkLibNames", "libraryPaths",
@@ -240,7 +240,11 @@ pub const AutoPkg = struct {
             return &me.step;
         } else {
             var me = b.allocator.create(std.build.Step) catch unreachable;
-            me.* = std.build.Step.initNoOp(std.build.Step.Id.Custom, "autopkgTestPlaceHolder", b.allocator);
+            const StepCustomI = 
+                if (@hasField(std.build.Step.Id, "custom")) @field(std.build.Step.Id, "custom")
+                else if (@hasField(std.build.Step.Id, "Custom")) @field(std.build.Step.Id, "Custom")
+                else @compileError("could not create custom step for std.build.Builder");
+            me.* = std.build.Step.initNoOp(StepCustomI, "autopkgTestPlaceHolder", b.allocator);
             for (dependedTestSteps) |step| {
                 if (step) |stepnn| {
                     me.dependOn(stepnn);
@@ -367,11 +371,6 @@ pub const AutoPkg = struct {
             alloc.free(self.path);
             alloc.free(self.rootSrc);
             alloc.free(self.dependencies);
-            const arrToBeFreed = [_][]const []const u8{
-                self.includeDirs,
-                self.cSrcFiles, self.linkSystemLibs,
-                self.linkLibNames, self.libraryPaths
-            };
             inline for (.{"includeDirs", "cSrcFiles", "linkSystemLibs", "linkLibNames", "libraryPaths", "testSrcs"}) |name| {
                 alloc.free(@field(self, name));
             }
