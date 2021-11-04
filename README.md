@@ -12,7 +12,7 @@ Zig build system lack of these important QoL features. This library is intented 
 | Zig Branch | Zig Version    | Supported |
 |------------|----------------|-----------|
 | stable     | 0.8.0, 0.8.1    | YES       |
-| master     | 0.9.0+dev.1139 | YES       |
+| master     | 0.9.0+dev.1561 | YES       |
 
 ## Basic Usage
 

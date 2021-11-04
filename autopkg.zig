@@ -101,7 +101,7 @@ pub const AutoPkgI = packed struct {
     fn advCast(obj: anytype) Self {
         const T = @TypeOf(obj);
         var newObj = Self {};
-        const requiredFieldList = comptime .{
+        const requiredFieldList = .{
             "name", "path", "rootSrc", "dependencies",
             "includeDirs", "cSrcFiles", "ccflags",
             "linkLibC", "linkSystemLibs", "linkLibNames", "libraryPaths",
@@ -240,11 +240,12 @@ pub const AutoPkg = struct {
             return &me.step;
         } else {
             var me = b.allocator.create(std.build.Step) catch unreachable;
-            const StepCustomI = 
-                if (@hasField(std.build.Step.Id, "custom")) @field(std.build.Step.Id, "custom")
-                else if (@hasField(std.build.Step.Id, "Custom")) @field(std.build.Step.Id, "Custom")
-                else @compileError("could not create custom step for std.build.Builder");
-            me.* = std.build.Step.initNoOp(StepCustomI, "autopkgTestPlaceHolder", b.allocator);
+            me.* = std.build.Step.initNoOp(
+                if(@hasField(std.build.Step.Id, "Custom"))
+                    std.build.Step.Id.Custom
+                else std.build.Step.Id.custom, // changed in 0.9.0+dev.1561 or earlier
+                "autopkgTestPlaceHolder",
+                b.allocator);
             for (dependedTestSteps) |step| {
                 if (step) |stepnn| {
                     me.dependOn(stepnn);
